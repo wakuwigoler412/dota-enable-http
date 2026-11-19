@@ -1,0 +1,93 @@
+name: CI
+
+# Every push and PR builds and tests. Pushing a tag vMAJOR.MINOR.PATCH
+# (optionally -suffix, published as a pre-release) also creates a GitHub
+# release with the exe attached.
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Determine version
+        id: version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            version="${GITHUB_REF_NAME#v}"
+            if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+              echo "::error::Tag '$GITHUB_REF_NAME' is not vMAJOR.MINOR.PATCH[-suffix]"
+              exit 1
+            fi
+          else
+            version="0.0.0-dev.${GITHUB_SHA::7}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Version: $version"
+
+      - name: Configure
+        shell: bash
+        run: cmake --preset release "-DAPP_VERSION=${{ steps.version.outputs.version }}"
+
+      - name: Build
+        run: cmake --build --preset release
+
+      - name: Test
+        run: ctest --preset release
+
+      - name: Check embedded version
+        shell: bash
+        run: |
+          out="$(build/dota-enable-http.exe --version --headless)"
+          echo "$out"
+          [[ "$out" == "dota-enable-http ${{ steps.version.outputs.version }}" ]]
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dota-enable-http-${{ steps.version.outputs.version }}
+          path: build/dota-enable-http.exe
+          if-no-files-found: error
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dota-enable-http-${{ needs.build.outputs.version }}
+
+      - name: Checksum
+        run: sha256sum dota-enable-http.exe > dota-enable-http.exe.sha256
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          flags=()
+          [[ "$VERSION" == *-* ]] && flags+=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "dota-enable-http $VERSION" \
+            --generate-notes \
+            "${flags[@]}" \
+            dota-enable-http.exe dota-enable-http.exe.sha256
