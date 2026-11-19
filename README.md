@@ -9,11 +9,14 @@ Grab `dota-enable-http.exe` from the [latest release](../../releases/latest).
 
 ## Usage
 
-Open Dota Workshop Tools, host a map, then run:
+Run it any time while Dota 2 is running:
 
 ```
 dota-enable-http
 ```
+
+The patch is applied in memory and lasts until Dota exits. If it reports that
+`server.dll` is not loaded, host a map and run it again.
 
 | Option | Effect |
 |--------|--------|
